@@ -5,11 +5,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict, Any
 
 
 TARGET_COL = "Exited"
-COLUMNS_TO_EXCLUDE = ["CustomerId", "Surname"]
+COLUMNS_TO_EXCLUDE = ["CustomerId", "Surname", "id"]
 
 
 def select_input_columns(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
@@ -177,21 +177,26 @@ def encode_categorical_features(
 def preprocess_data(
     raw_df: pd.DataFrame,
     scaler_numeric: bool = False,
-) -> Tuple[
-    pd.DataFrame,
-    pd.Series,
-    pd.DataFrame,
-    pd.Series,
-    List[str],
-    Optional[MinMaxScaler],
-    OneHotEncoder,
-]:
+) -> Dict[str, Any]:
     """
-    Full preprocessing pipeline.
+    Full preprocessing pipeline for bank churn data.
+
+    Args:
+        raw_df: Raw dataframe with all columns.
+        scaler_numeric: Whether to scale numeric features.
 
     Returns:
-        X_train, train_targets, X_val, val_targets,
-        input_cols, scaler, encoder
+        Dictionary containing:
+            - train_X: Training features
+            - train_y: Training targets
+            - val_X: Validation features
+            - val_y: Validation targets
+            - input_cols: List of final column names
+            - numeric_cols: List of numeric column names
+            - categorical_cols: List of categorical column names
+            - imputer: Fitted SimpleImputer
+            - scaler: Fitted MinMaxScaler (or None)
+            - encoder: Fitted OneHotEncoder
     """
 
     inputs_df, input_cols = select_input_columns(raw_df)
@@ -251,33 +256,44 @@ def preprocess_data(
     "val_X": X_val,
     "val_y": val_targets,
     "input_cols": final_cols,
+    "numeric_cols": numeric_cols,       
+    "categorical_cols": categorical_cols, 
+    "imputer": imputer,                 
     "scaler": scaler,
-    "encoder": encoder
+    "encoder": encoder,
 }
 
 
 def preprocess_new_data(
     new_df: pd.DataFrame,
-    input_cols: List[str],
-    scaler: Optional[MinMaxScaler],
-    encoder: OneHotEncoder,
     numeric_cols: List[str],
     categorical_cols: List[str],
+    imputer: SimpleImputer,
+    encoder: OneHotEncoder,
+    scaler: Optional[MinMaxScaler] = None,
 ) -> pd.DataFrame:
     """
-    Preprocess new unseen data using fitted scaler and encoder.
+    Process new data using pre-fitted transformers.
+
+    Args:
+        new_df: New DataFrame (e.g., test.csv).
+        numeric_cols: List of numeric columns (before encoding).
+        categorical_cols: List of categorical columns.
+        imputer: Fitted SimpleImputer for numeric features.
+        encoder: Fitted OneHotEncoder for categorical features.
+        scaler: Fitted MinMaxScaler (optional).
+
+    Returns:
+        Processed DataFrame with the same column order as during training.
     """
+    X = new_df[numeric_cols + categorical_cols].copy()
 
-    # 1 Select same input columns
-    X = new_df[input_cols].copy()
+    X[numeric_cols] = imputer.transform(X[numeric_cols])
 
-    # 2 Scale numeric features
     if scaler is not None:
         X[numeric_cols] = scaler.transform(X[numeric_cols])
 
-    # 3 Encode categorical features
     encoded = encoder.transform(X[categorical_cols])
-
     encoded_cols = encoder.get_feature_names_out(categorical_cols)
 
     encoded_df = pd.DataFrame(
@@ -286,14 +302,7 @@ def preprocess_new_data(
         index=X.index,
     )
 
-    # 4 Merge encoded columns
+    X = X.drop(columns=categorical_cols)
     X = pd.concat([X, encoded_df], axis=1)
 
-    # 5 Drop original categorical columns
-    X.drop(columns=categorical_cols, inplace=True)
-
-    # 6 Ensure same column order as training
-    final_cols = numeric_cols + list(encoded_cols)
-
-    return X[final_cols]
-
+    return X[numeric_cols + list(encoded_cols)]
